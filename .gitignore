@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.bak
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+.env.*
+
+# Model and training artifacts
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+outputs/
+models/
+
+# Reports and logs
+reports/
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
