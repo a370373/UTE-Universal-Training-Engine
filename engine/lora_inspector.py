@@ -1,9 +1,23 @@
 import gc
-from pathlib import Path
 
 import torch
 from peft import get_peft_model
-from transformers import AutoModelForCausalLM
+
+from engine.model_loader import load_base_model
+
+
+def _is_supported_linear(module):
+    if isinstance(module, torch.nn.Linear):
+        return True
+
+    # bitsandbytes quantized linear layers.
+    module_name = module.__class__.__name__
+    module_package = module.__class__.__module__
+
+    return (
+        module_package.startswith("bitsandbytes")
+        and module_name in {"Linear4bit", "Linear8bitLt"}
+    )
 
 
 def inspect_lora_injection(
@@ -11,6 +25,7 @@ def inspect_lora_injection(
     lora_config,
     dtype,
     device,
+    quantization=None,
 ):
     report = {
         "model_loaded": False,
@@ -20,6 +35,11 @@ def inspect_lora_injection(
         "trainable_parameters": 0,
         "trainable_percentage": 0.0,
         "embedding_shape": None,
+        "quantization": (
+            quantization["metadata"]
+            if quantization is not None
+            else {"method": "LoRA", "quantization": "none"}
+        ),
         "errors": [],
     }
 
@@ -27,14 +47,11 @@ def inspect_lora_injection(
     peft_model = None
 
     try:
-        local = Path(model_path).exists()
-
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
+        model = load_base_model(
+            model_path=model_path,
             dtype=dtype,
-            low_cpu_mem_usage=True,
-            trust_remote_code=False,
-            local_files_only=local,
+            quantization=quantization,
+            gradient_checkpointing=False,
         )
 
         report["model_loaded"] = True
@@ -42,29 +59,42 @@ def inspect_lora_injection(
         embeddings = model.get_input_embeddings()
 
         if embeddings is None:
-            raise RuntimeError("Model has no input embedding layer.")
+            raise RuntimeError(
+                "Model has no input embedding layer."
+            )
 
-        report["embedding_shape"] = list(embeddings.weight.shape)
+        report["embedding_shape"] = list(
+            embeddings.weight.shape
+        )
 
-        config_vocab = getattr(model.config, "vocab_size", None)
+        config_vocab = getattr(
+            model.config, "vocab_size", None
+        )
         embedding_vocab = embeddings.weight.shape[0]
 
-        if config_vocab is not None and config_vocab != embedding_vocab:
+        if (
+            config_vocab is not None
+            and config_vocab != embedding_vocab
+        ):
             report["errors"].append(
                 "Config vocabulary and embedding dimensions differ."
             )
 
-        if embeddings.weight.shape[0] < 1:
-            raise RuntimeError("Invalid embedding dimensions.")
+        if embedding_vocab < 1:
+            raise RuntimeError(
+                "Invalid embedding dimensions."
+            )
 
         linear_modules = [
             name
             for name, module in model.named_modules()
-            if isinstance(module, torch.nn.Linear)
+            if name and _is_supported_linear(module)
         ]
 
         if not linear_modules:
-            raise RuntimeError("No torch.nn.Linear modules detected.")
+            raise RuntimeError(
+                "No supported Linear modules detected."
+            )
 
         requested = lora_config.target_modules
 
@@ -73,13 +103,16 @@ def inspect_lora_injection(
                 raise RuntimeError(
                     f"Unsupported target module selector: {requested}"
                 )
+
             matched_modules = linear_modules
+
         else:
             matched_modules = [
                 name
                 for name in linear_modules
                 if any(
-                    name == target or name.endswith("." + target)
+                    name == target
+                    or name.endswith("." + target)
                     for target in requested
                 )
             ]
@@ -88,7 +121,8 @@ def inspect_lora_injection(
                 target
                 for target in requested
                 if not any(
-                    name == target or name.endswith("." + target)
+                    name == target
+                    or name.endswith("." + target)
                     for name in linear_modules
                 )
             ]
@@ -98,9 +132,14 @@ def inspect_lora_injection(
                     f"Target modules not found: {missing}"
                 )
 
-        report["target_modules"] = sorted(set(matched_modules))
+        report["target_modules"] = sorted(
+            set(matched_modules)
+        )
 
-        peft_model = get_peft_model(model, lora_config)
+        peft_model = get_peft_model(
+            model,
+            lora_config,
+        )
 
         total = sum(
             parameter.numel()
@@ -120,21 +159,26 @@ def inspect_lora_injection(
         )
 
         if trainable <= 0:
-            raise RuntimeError("LoRA injection produced no trainable parameters.")
+            raise RuntimeError(
+                "LoRA injection produced no trainable parameters."
+            )
 
         if trainable >= total:
             raise RuntimeError(
-                "All model parameters are trainable; expected PEFT-only training."
+                "All model parameters are trainable; "
+                "expected PEFT-only training."
             )
 
         report["injection_success"] = True
 
     except Exception as error:
-        report["errors"].append(str(error))
+        report["errors"].append(
+            f"{type(error).__name__}: {error}"
+        )
 
     finally:
-        del peft_model
-        del model
+        peft_model = None
+        model = None
 
         gc.collect()
 

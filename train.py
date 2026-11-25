@@ -27,6 +27,8 @@ from trl import SFTConfig, SFTTrainer
 
 from engine.version import ENGINE_NAME, ENGINE_VERSION
 from engine.adapter_verifier import verify_adapter_output
+from engine.quantization import resolve_quantization
+from engine.model_loader import load_base_model
 
 ALLOWED_ROLES = {"system", "user", "assistant"}
 
@@ -71,6 +73,31 @@ def parse_args():
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
+
+    parser.add_argument(
+        "--quantization",
+        choices=("none", "4bit"),
+        default="none",
+        help="Model quantization mode: none (LoRA) or 4bit (QLoRA)"
+    )
+    parser.add_argument(
+        "--quant-type",
+        choices=("nf4", "fp4"),
+        default="nf4",
+        help="4-bit quantization type"
+    )
+    parser.add_argument(
+        "--double-quant",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable or disable nested quantization"
+    )
+    parser.add_argument(
+        "--compute-dtype",
+        choices=("auto", "bf16", "fp16"),
+        default="auto",
+        help="QLoRA computation dtype"
+    )
     parser.add_argument(
         "--target-modules",
         default="all-linear",
@@ -365,21 +392,18 @@ def prepare_output_directory(output_dir, resume_checkpoint):
     return output_dir, None
 
 
-def build_model(model_path, dtype, cuda):
+def build_model(model_path, dtype, cuda, quantization=None):
     log("Loading Base Model...")
 
     try:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
+        model = load_base_model(
+            model_path=model_path,
             dtype=dtype,
-            low_cpu_mem_usage=True,
-            trust_remote_code=False,
-            local_files_only=Path(model_path).exists()
+            quantization=quantization,
+            gradient_checkpointing=True,
         )
     except Exception as error:
         fail(f"Base Model loading failed: {error}")
-
-    model.config.use_cache = False
 
     if not cuda:
         log("CPU training selected. Large models may train slowly.")
@@ -416,7 +440,8 @@ def write_run_metadata(
     model_config,
     precision,
     train_dataset,
-    validation_dataset
+    validation_dataset,
+    quantization,
 ):
     metadata = {
         "engine": ENGINE_NAME,
@@ -426,6 +451,7 @@ def write_run_metadata(
         "model_type": getattr(model_config, "model_type", None),
         "architectures": getattr(model_config, "architectures", None),
         "precision": precision,
+        "quantization": quantization["metadata"],
         "dataset": {
             "train_count": len(train_dataset),
             "validation_count": (
@@ -462,6 +488,19 @@ def main():
 
     dtype, precision, cuda = check_environment(args)
 
+    try:
+        quantization = resolve_quantization(
+            args, cuda, dtype, precision
+        )
+    except Exception as error:
+        fail(f"Quantization configuration failed: {error}")
+
+    precision = quantization["precision"]
+    dtype = quantization["compute_dtype"]
+
+    log("Quantization: " + quantization["mode"])
+    log(f"Training precision: {precision}")
+
     model_config = inspect_model(args.model)
     tokenizer = load_tokenizer(args.model)
 
@@ -474,6 +513,7 @@ def main():
             dtype,
             "cuda" if cuda else "cpu",
             args.preflight_report,
+            quantization,
         )
 
         if not report["passed"]:
@@ -494,6 +534,7 @@ def main():
             args.max_length,
             args.cpu_threads,
             args.smoke_test_report,
+            quantization,
         )
 
         if report["status"] != "passed":
@@ -520,6 +561,7 @@ def main():
             args.cpu_threads,
             cuda,
             args.trainer_integration_report,
+            quantization,
         )
 
         log(f"Trainer Integration report: {args.trainer_integration_report}")
@@ -549,7 +591,7 @@ def main():
         args.resume_checkpoint
     )
 
-    model = build_model(args.model, dtype, cuda)
+    model = build_model(args.model, dtype, cuda, quantization)
     lora_config = build_lora_config(args)
 
     training_args = SFTConfig(
@@ -597,7 +639,8 @@ def main():
         model_config,
         precision,
         train_dataset,
-        validation_dataset
+        validation_dataset,
+        quantization,
     )
 
     log("Starting training...")
@@ -628,6 +671,7 @@ def main():
         dtype=dtype,
         max_length=args.max_length,
         report_path=verification_report,
+        quantization=quantization,
     )
 
     if verification["status"] != "passed":

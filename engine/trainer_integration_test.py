@@ -11,9 +11,11 @@ from pathlib import Path
 import torch
 
 from datasets import Dataset
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 from peft import PeftModel
+from engine.model_loader import load_base_model
+from engine.version import ENGINE_VERSION
 
 
 def run_trainer_integration_test(
@@ -24,13 +26,19 @@ def run_trainer_integration_test(
     cpu_threads=4,
     cuda=False,
     report_path=None,
+    quantization=None,
 ):
     started = time.time()
 
     report = {
         "test": "trainer_integration_test",
-        "engine_version": "2.3.0",
+        "engine_version": ENGINE_VERSION,
         "model_path": str(model_path),
+        "quantization": (
+            quantization["metadata"]
+            if quantization is not None
+            else {"method": "LoRA", "quantization": "none"}
+        ),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "failed",
         "checks": {},
@@ -129,15 +137,12 @@ def run_trainer_integration_test(
 
         stage = "model_loading"
 
-        model = AutoModelForCausalLM.from_pretrained(
-            str(model_path),
+        model = load_base_model(
+            model_path=str(model_path),
             dtype=dtype,
-            low_cpu_mem_usage=True,
-            trust_remote_code=False,
-            local_files_only=True,
+            quantization=quantization,
+            gradient_checkpointing=False,
         )
-
-        model.config.use_cache = False
 
         report["checks"]["model_loading"] = True
 
@@ -157,8 +162,16 @@ def run_trainer_integration_test(
             eval_strategy="no",
             optim="adamw_torch",
             use_cpu=not cuda,
-            bf16=False,
-            fp16=False,
+            bf16=(
+                quantization["precision"] == "bf16"
+                if quantization is not None
+                else False
+            ),
+            fp16=(
+                quantization["precision"] == "fp16"
+                if quantization is not None
+                else False
+            ),
             max_length=max(8, min(max_length, 128)),
             packing=False,
             completion_only_loss=False,
@@ -243,15 +256,12 @@ def run_trainer_integration_test(
 
         stage = "adapter_reload"
 
-        base_model = AutoModelForCausalLM.from_pretrained(
-            str(model_path),
+        base_model = load_base_model(
+            model_path=str(model_path),
             dtype=dtype,
-            low_cpu_mem_usage=True,
-            trust_remote_code=False,
-            local_files_only=True,
+            quantization=quantization,
+            gradient_checkpointing=False,
         )
-
-        base_model.config.use_cache = False
 
         reloaded_model = PeftModel.from_pretrained(
             base_model,

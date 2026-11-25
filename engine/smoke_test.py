@@ -6,7 +6,8 @@ import traceback
 from pathlib import Path
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
+from engine.model_loader import load_base_model
 from peft import LoraConfig, get_peft_model
 
 
@@ -17,12 +18,18 @@ def run_smoke_test(
     max_length=128,
     cpu_threads=4,
     report_path=None,
+    quantization=None,
 ):
     started = time.time()
 
     report = {
         "test": "training_smoke_test",
         "model_path": str(model_path),
+        "quantization": (
+            quantization["metadata"]
+            if quantization is not None
+            else {"method": "LoRA", "quantization": "none"}
+        ),
         "status": "failed",
         "checks": {},
         "errors": [],
@@ -78,19 +85,19 @@ def run_smoke_test(
         report["input_tokens"] = int(input_ids.shape[-1])
 
         stage = "model_loading"
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
+        model = load_base_model(
+            model_path=model_path,
             dtype=dtype,
-            trust_remote_code=False,
-            local_files_only=Path(model_path).exists(),
-            low_cpu_mem_usage=True,
+            quantization=quantization,
+            gradient_checkpointing=False,
         )
-
-        model.config.use_cache = False
 
         stage = "lora_injection"
         peft_model = get_peft_model(model, lora_config)
         peft_model.train()
+
+        input_device = model.get_input_embeddings().weight.device
+        input_ids = input_ids.to(input_device)
 
         report["checks"]["lora_injection"] = True
 

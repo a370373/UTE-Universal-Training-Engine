@@ -8,7 +8,8 @@ import torch
 
 from peft import PeftModel
 from safetensors import safe_open
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
+from engine.model_loader import load_base_model
 
 from engine.version import ENGINE_VERSION
 
@@ -31,6 +32,7 @@ def verify_adapter_output(
     dtype=torch.float32,
     max_length=128,
     report_path=None,
+    quantization=None,
 ):
     adapter_dir = Path(adapter_dir)
 
@@ -39,6 +41,11 @@ def verify_adapter_output(
         "engine_version": ENGINE_VERSION,
         "model_path": str(model_path),
         "adapter_dir": str(adapter_dir),
+        "quantization": (
+            quantization["metadata"]
+            if quantization is not None
+            else {"method": "LoRA", "quantization": "none"}
+        ),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "failed",
         "checks": {
@@ -130,12 +137,11 @@ def verify_adapter_output(
             local_files_only=Path(model_path).exists(),
         )
 
-        base_model = AutoModelForCausalLM.from_pretrained(
-            model_path,
+        base_model = load_base_model(
+            model_path=model_path,
             dtype=dtype,
-            low_cpu_mem_usage=True,
-            trust_remote_code=False,
-            local_files_only=Path(model_path).exists(),
+            quantization=quantization,
+            gradient_checkpointing=False,
         )
 
         adapter_model = PeftModel.from_pretrained(
@@ -158,7 +164,7 @@ def verify_adapter_output(
             max_length=max_length,
         )
 
-        device = next(adapter_model.parameters()).device
+        device = adapter_model.get_input_embeddings().weight.device
 
         inputs = {
             key: value.to(device)
@@ -192,8 +198,12 @@ def verify_adapter_output(
         report["traceback"] = traceback.format_exc()
 
     finally:
-        del adapter_model
-        del base_model
+        adapter_model = None
+        base_model = None
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     report["duration_note"] = (
         "Verification completed. "

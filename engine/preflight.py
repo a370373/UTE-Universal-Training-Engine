@@ -13,6 +13,7 @@ def run_preflight(
     dtype,
     device,
     report_path,
+    quantization=None,
 ):
     print("[UTE] ===== PREFLIGHT START =====", flush=True)
 
@@ -37,6 +38,7 @@ def run_preflight(
             lora_config,
             dtype,
             device,
+            quantization,
         )
 
         print(
@@ -50,6 +52,11 @@ def run_preflight(
         "engine_version": ENGINE_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "model": str(model_path),
+        "quantization": (
+            quantization["metadata"]
+            if quantization is not None
+            else {"method": "LoRA", "quantization": "none"}
+        ),
         "compatibility": compatibility,
         "lora": lora_report,
         "passed": (
