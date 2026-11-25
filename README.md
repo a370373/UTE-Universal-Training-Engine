@@ -1,0 +1,542 @@
+## 🚀 UTE — Universal Training Engine
+
+通用訓練引擎（Universal Training Engine）
+
+一套以 Python 建構、基於 Hugging Face 生態系的可重用模型訓練引擎，專注於 Causal Language Model（因果語言模型）的 Supervised Fine-Tuning（SFT）與 LoRA 微調。
+
+UTE 將模型相容性檢查、硬體偵測、LoRA 注入檢查、訓練流程測試、Trainer 整合測試，以及 Adapter 輸出驗證整合為模組化的訓練工作流程。
+
+## 🎯 設計目標：讓不同模型、不同專案與不同執行環境，都能在一致的訓練流程下使用同一套引擎。
+
+# 讓每個人都能訓練 AI Model，小模型也許能超越大模型 who knows 🤷‍♂️ 
+
+---
+
+## 📌 專案簡介
+
+UTE（Universal Training Engine）是一個獨立、可重用的模型訓練引擎。
+
+它並不是為某個特定模型或單一 AI 專案打造，而是將常見的 SFT + LoRA 訓練流程抽象成可重用的程式模組。
+
+UTE 的設計不綁定：
+
+- 特定模型名稱
+- 特定 Hugging Face Model ID
+- 特定本機模型路徑
+- 特定訓練資料集
+- 特定 AI 專案
+- 特定輸出目錄
+- 單一硬體設備
+
+只要模型與執行環境符合目前支援的技術範圍，就可以透過 UTE 執行訓練工作流程。
+
+## ✨ 核心功能
+
+# 🖥️ 1. Hardware Profiler
+
+硬體偵測與資源資訊分析。
+
+目前包含：
+
+- CPU 型號與核心資訊
+- CPU Logical / Physical Cores
+- CPU Affinity
+- CPU Quota
+- 系統記憶體資訊
+- Cgroup Memory 限制偵測
+- NVIDIA / CUDA 環境偵測
+- 建議 CPU 執行緒數量
+- 硬體資訊 JSON 報告
+
+# 🔍 2. Compatibility Checker
+
+模型相容性檢查。
+
+使用 Hugging Face Transformers 檢查模型相關資訊，包括：
+
+- 模型架構辨識
+- Causal Language Model 架構檢查
+- Tokenizer 載入檢查
+- Chat Template 檢查
+- Vocabulary 相容性檢查
+- 模型與 Tokenizer 相關資訊
+
+目標是在正式訓練前，盡可能識別模型與 Tokenizer 的相容性問題。
+
+# 🧩 3. LoRA Inspector
+
+LoRA 注入與模型結構檢查。
+
+包含：
+
+- 模型載入
+- Embedding 結構檢查
+- Linear Modules 探測
+- LoRA Target Modules 檢查
+- PEFT LoRA 注入
+- Trainable Parameters 統計
+- Trainable Parameters Ratio 計算
+
+# 🛡️ 4. Preflight Engine
+
+正式訓練前的預檢引擎。
+
+整合 Compatibility Checker 與 LoRA Inspector，協助確認：
+
+- 模型是否符合支援範圍
+- Tokenizer 是否能正常載入
+- 模型結構是否符合預期
+- LoRA 是否能正常注入
+- 可訓練參數是否正確建立
+
+預檢結果可以輸出為 JSON 報告。
+
+# 🧪 5. Training Smoke Test
+
+訓練基本流程測試。
+
+透過小型測試流程驗證：
+
+1. Tokenization
+2. LoRA Injection
+3. Forward Pass
+4. Backward Pass
+5. Gradient 檢查
+6. Optimizer Step
+
+用於確認模型是否具備基本的訓練執行能力。
+
+# 🔗 6. Trainer Integration Test
+
+Hugging Face TRL Trainer 整合測試。
+
+使用合成測試資料執行實際 Trainer 訓練流程，檢查：
+
+- Dataset 建立
+- SFTConfig 初始化
+- SFTTrainer 初始化
+- Trainer Training Step
+- Adapter 儲存
+- Adapter 設定檢查
+- Adapter 權重檢查
+- Adapter 重新載入
+
+此模組用於確認 UTE 與 TRL Trainer 的整合流程能否正常執行。
+
+# 📦 7. Adapter Output Verifier
+
+LoRA Adapter 輸出驗證器。
+
+正式訓練完成後，獨立驗證輸出的 Adapter。
+
+目前檢查項目包含：
+
+- Adapter Configuration
+- Safetensors 權重檔案
+- LoRA Metadata
+- Adapter 載入
+- Base Model 與 Adapter 整合
+- Forward Pass
+- Logits 有限數值檢查
+- JSON 驗證報告
+
+不只確認檔案是否存在，也會實際重新載入 Adapter 並執行模型推論檢查。
+
+---
+
+# 🏗️ 系統架構
+
+UTE 採用模組化設計，各個功能可以由訓練主程式統一協調。
+
+```
+                 UTE
+       Universal Training Engine
+                  │
+                  ▼
+          ┌───────────────┐
+          │    train.py   │
+          │   Training CLI│
+          └───────┬───────┘
+                  │
+       ┌──────────┼───────────┐
+       │          │           │
+       ▼          ▼           ▼
+  Hardware   Compatibility   Preflight
+  Profiler     Checker       Engine
+       │          │           │
+       │          ▼           │
+       │     LoRA Inspector   │
+       │          │           │
+       └──────────┼───────────┘
+                  │
+                  ▼
+           Training Workflow
+                  │
+       ┌──────────┼───────────┐
+       │          │           │
+       ▼          ▼           ▼
+    Smoke      Trainer     SFT Training
+    Test       Integration     │
+                  Test         ▼
+                         Adapter Saving
+                                │
+                                ▼
+                       Adapter Verifier
+                                │
+                                ▼
+                         JSON Reports
+```
+# 📁 專案目錄
+```
+UTE-Universal-Training-Engine/
+│
+├── train.py
+├── requirements.txt
+├── .gitignore
+├── LICENSE
+├── README.md
+│
+└── engine/
+    ├── __init__.py
+    ├── version.py
+    ├── hardware.py
+    ├── compatibility.py
+    ├── lora_inspector.py
+    ├── preflight.py
+    ├── smoke_test.py
+    ├── trainer_integration_test.py
+    └── adapter_verifier.py
+```
+---
+
+# 🧰 技術架構
+
+UTE 使用成熟的 Python AI 訓練生態系。
+
+技術| 用途
+Python| 主要開發語言
+PyTorch| 深度學習與模型訓練
+Transformers| 模型與 Tokenizer 管理
+Datasets| 訓練資料處理
+PEFT| Parameter-Efficient Fine-Tuning
+TRL| Supervised Fine-Tuning Trainer
+Safetensors| 模型權重安全序列化
+
+# 🔧 核心技術方向
+
+- Causal Language Modeling
+- Supervised Fine-Tuning
+- Low-Rank Adaptation
+- Parameter-Efficient Fine-Tuning
+- Model Compatibility Inspection
+- Training Workflow Validation
+- Adapter Verification
+
+---
+
+# 📥 安裝方式
+
+1. 取得專案
+
+git clone https://github.com/a370373/UTE-Universal-Training-Engine.git
+
+cd UTE-Universal-Training-Engine
+
+2. 建立 Python 虛擬環境（建議）
+
+python3 -m venv .venv
+
+source .venv/bin/activate
+
+Windows 使用者：
+
+python -m venv .venv
+
+.venv\Scripts\activate
+
+3. 安裝 PyTorch
+
+請依照自己的作業系統、硬體及加速環境，選擇適合的 PyTorch 安裝方式：
+
+https://pytorch.org/get-started/locally/
+
+4. 安裝 UTE 依賴
+
+pip install -r requirements.txt
+
+5. 確認安裝
+
+python train.py --help
+
+如果正常顯示 CLI 使用說明，代表主程式可以啟動。
+
+---
+
+# 🚀 使用方式
+
+UTE 使用命令列介面管理訓練流程。
+
+基本訓練
+
+python train.py \
+  --model /path/to/model \
+  --data-dir /path/to/dataset \
+  --output-dir ./output
+
+參數說明：
+
+參數| 說明
+"--model"| 模型本機路徑或支援的 Hugging Face Model ID
+"--data-dir"| 訓練資料目錄
+"--output-dir"| Adapter 輸出目錄
+
+常用訓練參數
+
+UTE 也提供訓練設定參數：
+
+參數| 說明
+"--epochs"| 訓練 Epoch 數量
+"--learning-rate"| Learning Rate
+"--max-length"| 最大 Token Sequence Length
+"--batch-size"| Batch Size
+"--gradient-accumulation"| Gradient Accumulation Steps
+"--lora-r"| LoRA Rank
+"--lora-alpha"| LoRA Alpha
+"--lora-dropout"| LoRA Dropout
+"--target-modules"| LoRA Target Modules
+"--cpu-threads"| CPU 執行緒設定
+"--seed"| 隨機種子
+"--resume-checkpoint"| 從既有 Checkpoint 恢復訓練
+
+實際可用參數、預設值與完整使用方式，請以目前版本的 CLI 說明為準：
+
+python train.py --help
+
+# 🔎 驗證與測試模式
+
+UTE 提供多種訓練前與訓練整合測試功能：
+
+- Validate Only：僅執行驗證流程。
+- Preflight：執行訓練前檢查。
+- Smoke Test：測試基本 Forward / Backward 與 Optimizer 流程。
+- Trainer Integration Test：測試 TRL Trainer 整合。
+
+各測試功能與報告輸出參數可透過：
+
+python train.py --help
+
+查詢。
+
+---
+
+# 📊 訓練資料與 Loss 設定
+
+UTE 目前採用整段訓練序列參與 Loss 計算的設定。
+
+目前正式訓練配置：
+
+assistant_only_loss = False
+completion_only_loss = False
+
+也就是不只對 Assistant 回覆部分計算 Loss，而是依照目前的資料與標籤處理流程，讓整段序列參與訓練。
+
+資料集的具體欄位、格式與載入規則，應以目前版本 "train.py" 的資料載入實作為準；不要假設所有 JSON、JSONL 或其他資料集格式都能直接使用。
+
+---
+
+# 🖥️ 執行環境與硬體
+
+UTE 的設計目標是避免將訓練流程綁定在單一硬體環境。
+
+理論上可以依照相依套件與後端支援情況，部署在不同的 Python 執行環境。
+
+可能的執行環境包括：
+
+- Linux
+- Windows
+- macOS
+- CPU 執行環境
+- NVIDIA CUDA 執行環境
+- 其他 PyTorch 支援的相容環境
+
+但這些環境並不代表目前都已完成獨立測試。
+
+# 📱 手機與 ARM 環境
+
+UTE 的核心程式使用 Python，不以 x86_64 作為程式本身的必要條件。
+
+因此，ARM 裝置在理論上也可以嘗試執行 UTE。
+
+然而，手機上的 PyTorch、Transformers、PEFT、TRL 相依套件安裝、模型記憶體需求及硬體加速後端，都需要另外驗證。
+
+# ⚠️ 硬體資源提醒
+
+LoRA 可以降低需要訓練的參數量，但基礎模型仍然需要載入記憶體。
+
+實際需求取決於：
+
+- Base Model 大小
+- Model Precision
+- Sequence Length
+- Batch Size
+- Gradient Accumulation
+- Optimizer
+- LoRA Configuration
+- CPU / GPU 記憶體容量
+
+請依照實際設備選擇模型與訓練參數。
+
+---
+
+# 🧪 開發與測試狀態
+
+目前 UTE 已建立以下測試模組：
+
+測試項目| 功能
+Compatibility Checker| 模型相容性檢查
+LoRA Inspector| LoRA 注入檢查
+Preflight Engine| 訓練前檢查
+Smoke Test| Forward / Backward / Optimizer 測試
+Trainer Integration Test| TRL Trainer 整合測試
+Adapter Output Verifier| Adapter 輸出與重新載入驗證
+
+已完成的開發測試
+
+目前開發過程中已完成：
+
+- Compatibility Checker 測試
+- LoRA Inspector 測試
+- Preflight Engine 測試
+- Training Smoke Test
+- Trainer Integration Test
+- Adapter Verifier 語法與匯入檢查
+- CLI 啟動檢查
+
+目前已驗證的 Smoke Test 包含：
+
+- Tokenization
+- LoRA Injection
+- Forward Pass
+- Backward Pass
+- Optimizer Step
+
+注意： 測試模組存在，不代表所有模型、作業系統、硬體後端與依賴版本組合都已通過測試。正式訓練輸出的 Adapter 仍應透過 Adapter Verifier 實際驗證。
+
+---
+
+# 🔄 設計原則
+
+UTE 遵循以下設計原則：
+
+1. 模型獨立性
+
+不將引擎綁定至單一模型或 Model ID。
+
+2. 專案獨立性
+
+UTE 是獨立的訓練工具，不屬於任何特定 AI 模型專案。
+
+3. 模組化
+
+硬體偵測、相容性檢查、LoRA 分析、訓練測試及輸出驗證各自獨立。
+
+4. 可重用性
+
+不同專案可以使用相同的 UTE 訓練流程，而不需要為每個模型重新建立整套訓練引擎。
+
+5. 可驗證性
+
+除了執行訓練，也重視訓練前檢查、整合測試與輸出驗證。
+
+6. 不綁定單一硬體
+
+盡可能將訓練流程與實際硬體環境分離，讓不同環境可以依照相依套件與後端能力使用 UTE。
+
+---
+
+# 🗺️ 開發方向
+
+未來可以持續改善的方向包括：
+
+- [ ] 更完整的跨平台相容性驗證
+- [ ] 更多模型架構相容性測試
+- [ ] 更多 PyTorch 硬體後端測試
+- [ ] 更完整的資料集格式與驗證流程
+- [ ] 更完善的訓練中斷與恢復測試
+- [ ] 更完整的 Adapter 輸出驗證
+- [ ] 依賴版本相容性矩陣
+- [ ] 更詳細的硬體資源分析
+
+以上為可能的開發方向，不代表相關功能已經實作。
+
+---
+
+# 🤝 參與專案
+
+歡迎對 Python、PyTorch、Transformers、PEFT、TRL 與模型訓練工具有興趣的開發者參與。
+
+你可以透過以下方式協助：
+
+- 回報 Bug
+- 提交 Issue
+- 提供相容性測試結果
+- 改善文件
+- 提交 Pull Request
+- 擴充測試模組
+
+在提交修改前，請盡可能確認不會破壞既有的訓練流程與模組介面。
+
+---
+
+# 📜 License
+
+UTE 採用 Apache License 2.0 開源授權。
+
+詳細授權內容請參閱：
+
+"LICENSE" (LICENSE)
+
+---
+
+## 🚀 UTE — Universal Training Engine
+
+One Engine. Reusable Training Workflows.
+
+---
+
+## 📬 聯繫創作者
+
+- Gmail: b0953166696@gmail.com
+- 本人17歲🤔 做的不好請見諒
+- 獨立開發 ＆ AI協作
+- 緩慢更新 ＆ 除錯
+- 純手機Termux 開發👀
+- 持續開發中…
+
+---
+
+## 👀作品 & 產品 集
+
+- [UTE-UNIVERSAL-TRAINING-ENGINE](https://github.com/a370373/UTE-Universal-Training-Engine)
+- [0-or-1](https://github.com/a370373/0-or-1)
+- [MyDNS](https://github.com/a370373/MyDNS/tree/main)
+- [Cyber-Fly-Android-Bridge](https://github.com/a370373/Cyber-Fly-Android-Bridge)
+- [My-ADB-Shell](https://github.com/a370373/My-ADB-Shell/tree/main)
+- [Cyber-Fly](https://github.com/a370373/Cyber-Fly)
+- [MyOS](https://github.com/a370373/MyOS)
+- [RWM-1:1 Real World Minecraft](https://github.com/a370373/RWM-Real-World-Minecraft)
+- [MyAI-Offline Personal AI Agent System](https://github.com/a370373/MyAI-Offline-Personal-AI-Agent-System-/tree/main)
+- [WCL - Web Clone Lab](https://github.com/a370373/web-clone-lab/)
+- 持續增加中…👀
+
+---
+
+## 🤖 AI 協作
+
+UTE 由 a370373/XRH 發起、設計與開發。
+
+開發過程中使用 OpenAI ChatGPT 作為 AI 協作夥伴，協助進行 技術分析、程式碼檢查、除錯 & 文件整理。
+
+產品方向、設計理念 & 最終決策由專案創作者負責。
+
+
