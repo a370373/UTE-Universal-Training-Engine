@@ -29,6 +29,7 @@ from engine.version import ENGINE_NAME, ENGINE_VERSION
 from engine.adapter_verifier import verify_adapter_output
 from engine.quantization import resolve_quantization
 from engine.model_loader import load_base_model
+from engine.embedding_training import configure_embedding_training
 
 ALLOWED_ROLES = {"system", "user", "assistant"}
 
@@ -73,6 +74,13 @@ def parse_args():
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
+
+    parser.add_argument(
+        "--train-embeddings",
+        action="store_true",
+        default=False,
+        help="Train and save input embeddings and output LM head modules"
+    )
 
     parser.add_argument(
         "--quantization",
@@ -470,6 +478,7 @@ def write_run_metadata(
             "lora_alpha": args.lora_alpha,
             "lora_dropout": args.lora_dropout,
             "target_modules": args.target_modules,
+            "train_embeddings": args.train_embeddings,
             "seed": args.seed
         }
     }
@@ -514,6 +523,7 @@ def main():
             "cuda" if cuda else "cpu",
             args.preflight_report,
             quantization,
+            args.train_embeddings,
         )
 
         if not report["passed"]:
@@ -535,6 +545,7 @@ def main():
             args.cpu_threads,
             args.smoke_test_report,
             quantization,
+            args.train_embeddings,
         )
 
         if report["status"] != "passed":
@@ -562,6 +573,7 @@ def main():
             cuda,
             args.trainer_integration_report,
             quantization,
+            args.train_embeddings,
         )
 
         log(f"Trainer Integration report: {args.trainer_integration_report}")
@@ -593,6 +605,27 @@ def main():
 
     model = build_model(args.model, dtype, cuda, quantization)
     lora_config = build_lora_config(args)
+
+    embedding_info = None
+
+    if args.train_embeddings:
+        try:
+            embedding_info = configure_embedding_training(
+                model,
+                lora_config
+            )
+        except Exception as error:
+            fail(f"Embedding training configuration failed: {error}")
+
+        log("Embedding training enabled.")
+        log(
+            "Resolved modules_to_save: "
+            + ", ".join(embedding_info["modules_to_save"])
+        )
+        log(
+            "Tied embeddings: "
+            + str(embedding_info["tied_embeddings"])
+        )
 
     training_args = SFTConfig(
         output_dir=str(output_dir),

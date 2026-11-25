@@ -15,6 +15,7 @@ from transformers import AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 from peft import PeftModel
 from engine.model_loader import load_base_model
+from engine.embedding_training import configure_embedding_training
 from engine.version import ENGINE_VERSION
 
 
@@ -27,6 +28,7 @@ def run_trainer_integration_test(
     cuda=False,
     report_path=None,
     quantization=None,
+    train_embeddings=False,
 ):
     started = time.time()
 
@@ -146,6 +148,24 @@ def run_trainer_integration_test(
 
         report["checks"]["model_loading"] = True
 
+        if train_embeddings:
+            stage = "embedding_training_configuration"
+
+            embedding_info = configure_embedding_training(
+                model,
+                lora_config
+            )
+
+            report["embedding_training"] = {
+                "enabled": True,
+                **embedding_info,
+            }
+        else:
+            report["embedding_training"] = {
+                "enabled": False,
+            }
+
+
         stage = "trainer_configuration"
 
         training_args = SFTConfig(
@@ -230,6 +250,26 @@ def run_trainer_integration_test(
 
         if not adapter_weights.is_file():
             adapter_weights = adapter_output / "adapter_model.bin"
+
+        if train_embeddings:
+            saved_config = json.loads(
+                adapter_config.read_text(encoding="utf-8")
+            )
+
+            saved_modules = saved_config.get("modules_to_save") or []
+            expected_modules = set(
+                report["embedding_training"]["modules_to_save"]
+            )
+
+            if not expected_modules.issubset(set(saved_modules)):
+                raise RuntimeError(
+                    "Saved adapter config does not contain all expected "
+                    "embedding modules. "
+                    f"Expected: {sorted(expected_modules)}; "
+                    f"saved: {saved_modules}"
+                )
+
+            report["checks"]["embedding_modules_saved"] = True
 
         if not adapter_weights.is_file():
             raise RuntimeError("Adapter weights were not saved.")

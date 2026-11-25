@@ -14,6 +14,7 @@ def run_preflight(
     device,
     report_path,
     quantization=None,
+    train_embeddings=False,
 ):
     print("[UTE] ===== PREFLIGHT START =====", flush=True)
 
@@ -39,6 +40,7 @@ def run_preflight(
             dtype,
             device,
             quantization,
+            train_embeddings,
         )
 
         print(

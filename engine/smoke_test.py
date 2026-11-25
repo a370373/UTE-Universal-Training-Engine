@@ -8,6 +8,7 @@ from pathlib import Path
 import torch
 from transformers import AutoTokenizer
 from engine.model_loader import load_base_model
+from engine.embedding_training import configure_embedding_training
 from peft import LoraConfig, get_peft_model
 
 
@@ -19,6 +20,7 @@ def run_smoke_test(
     cpu_threads=4,
     report_path=None,
     quantization=None,
+    train_embeddings=False,
 ):
     started = time.time()
 
@@ -91,6 +93,20 @@ def run_smoke_test(
             quantization=quantization,
             gradient_checkpointing=False,
         )
+
+        if train_embeddings:
+            embedding_info = configure_embedding_training(
+                model,
+                lora_config
+            )
+            report["embedding_training"] = {
+                "enabled": True,
+                **embedding_info,
+            }
+        else:
+            report["embedding_training"] = {
+                "enabled": False,
+            }
 
         stage = "lora_injection"
         peft_model = get_peft_model(model, lora_config)

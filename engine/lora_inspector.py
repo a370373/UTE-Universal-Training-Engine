@@ -4,6 +4,7 @@ import torch
 from peft import get_peft_model
 
 from engine.model_loader import load_base_model
+from engine.embedding_training import configure_embedding_training
 
 
 def _is_supported_linear(module):
@@ -26,6 +27,7 @@ def inspect_lora_injection(
     dtype,
     device,
     quantization=None,
+    train_embeddings=False,
 ):
     report = {
         "model_loaded": False,
@@ -55,6 +57,20 @@ def inspect_lora_injection(
         )
 
         report["model_loaded"] = True
+
+        if train_embeddings:
+            embedding_info = configure_embedding_training(
+                model,
+                lora_config
+            )
+            report["embedding_training"] = {
+                "enabled": True,
+                **embedding_info,
+            }
+        else:
+            report["embedding_training"] = {
+                "enabled": False,
+            }
 
         embeddings = model.get_input_embeddings()
 
