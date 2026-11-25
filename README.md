@@ -2,13 +2,15 @@
 
 通用訓練引擎（Universal Training Engine）
 
-一套以 Python 建構、基於 Hugging Face 生態系的可重用模型訓練引擎，專注於 Causal Language Model（因果語言模型）的 Supervised Fine-Tuning（SFT）與 LoRA 微調。
+Version: 2.4.0
 
-UTE 將模型相容性檢查、硬體偵測、LoRA 注入檢查、訓練流程測試、Trainer 整合測試，以及 Adapter 輸出驗證整合為模組化的訓練工作流程。
+一套以 Python 建構、基於 Hugging Face 生態系的可重用模型訓練引擎，專注於 Causal Language Model（因果語言模型）的 Supervised Fine-Tuning（SFT）、LoRA 與 QLoRA 微調。
 
-## 🎯 設計目標：讓不同模型、不同專案與不同執行環境，都能在一致的訓練流程下使用同一套引擎。
+UTE 將模型相容性檢查、硬體偵測、LoRA 注入檢查、模型量化設定、模型載入、訓練流程測試、Trainer 整合測試，以及 Adapter 輸出驗證整合為模組化的訓練工作流程。
 
-# 讓每個人都能訓練 AI Model，小模型也許能超越大模型 who knows 🤷‍♂️ 
+# 🎯 設計目標：讓不同模型、不同專案與不同執行環境，都能在一致的訓練流程下使用同一套引擎。
+
+# 讓每個人都能訓練 AI Model，小模型也許能超越大模型 who knows 🤷‍♂️
 
 ---
 
@@ -16,7 +18,12 @@ UTE 將模型相容性檢查、硬體偵測、LoRA 注入檢查、訓練流程�
 
 UTE（Universal Training Engine）是一個獨立、可重用的模型訓練引擎。
 
-它並不是為某個特定模型或單一 AI 專案打造，而是將常見的 SFT + LoRA 訓練流程抽象成可重用的程式模組。
+它並不是為某個特定模型或單一 AI 專案打造，而是將常見的 SFT + LoRA / QLoRA 訓練流程抽象成可重用的程式模組。
+
+UTE 提供兩種主要訓練模式：
+
+- LoRA：一般 LoRA 微調，預設訓練模式。
+- QLoRA 4-bit：透過 4-bit 量化載入 Base Model，搭配 LoRA 進行參數高效微調。
 
 UTE 的設計不綁定：
 
@@ -142,56 +149,100 @@ LoRA Adapter 輸出驗證器。
 
 不只確認檔案是否存在，也會實際重新載入 Adapter 並執行模型推論檢查。
 
+# ⚙️ 8. Quantization Engine
+
+模型量化設定引擎。
+
+目前支援：
+
+- No Quantization：一般 LoRA 模式
+- 4-bit Quantization：QLoRA 模式
+- NF4 Quantization
+- FP4 Quantization
+- Double Quantization
+- BF16 Compute Dtype
+- FP16 Compute Dtype
+- Automatic Compute Dtype Selection
+- CUDA 環境檢查
+- 選用量化依賴檢查
+
+Quantization Engine 負責解析使用者指定的量化設定，並在模型載入前確認執行環境是否符合目前 QLoRA 的需求。
+
+# 🧠 9. Shared Model Loader
+
+共用模型載入模組。
+
+統一管理 Base Model 載入流程，包括：
+
+- Hugging Face AutoModelForCausalLM
+- Local Model Loading
+- Model Precision Configuration
+- Quantization Configuration
+- CUDA Device Mapping
+- 4-bit Model Loading
+- QLoRA K-bit Training Preparation
+
+一般 LoRA 與 QLoRA 共用同一套模型載入架構，避免不同訓練模式各自維護重複的載入邏輯。
+
 ---
 
 # 🏗️ 系統架構
 
 UTE 採用模組化設計，各個功能可以由訓練主程式統一協調。
+```
+                    UTE
+          Universal Training Engine
+                     │
+                     ▼
+             ┌───────────────┐
+             │    train.py   │
+             │  Training CLI │
+             └───────┬───────┘
+                     │
+       ┌─────────────┼──────────────┐
+       │             │              │
+       ▼             ▼              ▼
+  Hardware     Compatibility    Quantization
+  Profiler       Checker          Engine
+       │             │              │
+       │             ▼              │
+       │       LoRA Inspector       │
+       │             │              │
+       └─────────────┼──────────────┘
+                     │
+                     ▼
+             Shared Model Loader
+                     │
+                     ▼
+             Training Workflow
+                     │
+       ┌─────────────┼──────────────┐
+       │             │              │
+       ▼             ▼              ▼
+    Smoke         Trainer       SFT Training
+    Test         Integration          │
+                    Test              ▼
+                              Adapter Saving
+                                     │
+                                     ▼
+                              Adapter Verifier
+                                     │
+                                     ▼
+                                JSON Reports
+```
+一般 LoRA 與 QLoRA 共用訓練工作流程。
 
-```
-                 UTE
-       Universal Training Engine
-                  │
-                  ▼
-          ┌───────────────┐
-          │    train.py   │
-          │   Training CLI│
-          └───────┬───────┘
-                  │
-       ┌──────────┼───────────┐
-       │          │           │
-       ▼          ▼           ▼
-  Hardware   Compatibility   Preflight
-  Profiler     Checker       Engine
-       │          │           │
-       │          ▼           │
-       │     LoRA Inspector   │
-       │          │           │
-       └──────────┼───────────┘
-                  │
-                  ▼
-           Training Workflow
-                  │
-       ┌──────────┼───────────┐
-       │          │           │
-       ▼          ▼           ▼
-    Smoke      Trainer     SFT Training
-    Test       Integration     │
-                  Test         ▼
-                         Adapter Saving
-                                │
-                                ▼
-                       Adapter Verifier
-                                │
-                                ▼
-                         JSON Reports
-```
-# 📁 專案目錄
+兩者主要差異在於 Base Model 的載入與量化設定，而不是各自維護一套獨立 Trainer。
+
+---
+
+📁 專案目錄
 ```
 UTE-Universal-Training-Engine/
 │
 ├── train.py
 ├── requirements.txt
+├── requirements-qlora.txt
 ├── .gitignore
 ├── LICENSE
 ├── README.md
@@ -201,6 +252,8 @@ UTE-Universal-Training-Engine/
     ├── version.py
     ├── hardware.py
     ├── compatibility.py
+    ├── quantization.py
+    ├── model_loader.py
     ├── lora_inspector.py
     ├── preflight.py
     ├── smoke_test.py
@@ -209,7 +262,7 @@ UTE-Universal-Training-Engine/
 ```
 ---
 
-# 🧰 技術架構
+## 🧰 技術架構
 
 UTE 使用成熟的 Python AI 訓練生態系。
 
@@ -221,20 +274,27 @@ Datasets| 訓練資料處理
 PEFT| Parameter-Efficient Fine-Tuning
 TRL| Supervised Fine-Tuning Trainer
 Safetensors| 模型權重安全序列化
+bitsandbytes| 4-bit 模型量化支援
+Accelerate| 模型載入與裝置管理支援
 
-# 🔧 核心技術方向
+## 🔧 核心技術方向
 
 - Causal Language Modeling
 - Supervised Fine-Tuning
 - Low-Rank Adaptation
+- Quantized Low-Rank Adaptation
 - Parameter-Efficient Fine-Tuning
+- 4-bit Model Quantization
+- NF4 / FP4 Quantization
+- Double Quantization
 - Model Compatibility Inspection
+- Shared Model Loading
 - Training Workflow Validation
 - Adapter Verification
 
 ---
 
-# 📥 安裝方式
+## 📥 安裝方式
 
 1. 取得專案
 
@@ -243,6 +303,8 @@ git clone https://github.com/a370373/UTE-Universal-Training-Engine.git
 cd UTE-Universal-Training-Engine
 
 2. 建立 Python 虛擬環境（建議）
+
+Linux / macOS：
 
 python3 -m venv .venv
 
@@ -264,7 +326,28 @@ https://pytorch.org/get-started/locally/
 
 pip install -r requirements.txt
 
-5. 確認安裝
+此步驟安裝一般 LoRA 訓練所需的主要依賴。
+
+5. QLoRA 4-bit 額外依賴（選用）
+
+一般 LoRA 使用者不需要安裝額外的量化依賴。
+
+若要使用 QLoRA 4-bit，請先確認系統具有符合需求的 NVIDIA CUDA GPU 與 PyTorch CUDA 環境，再安裝：
+
+pip install -r requirements-qlora.txt
+
+此檔案包含：
+
+- bitsandbytes
+- accelerate
+
+注意：
+
+- QLoRA 需要符合相依套件、CUDA 與硬體相容性要求。
+- 目前 QLoRA 實作要求受支援的 CUDA GPU。
+- 一般 LoRA 不需要安裝 bitsandbytes 與 accelerate 這組額外量化依賴。
+
+6. 確認安裝
 
 python train.py --help
 
@@ -272,18 +355,64 @@ python train.py --help
 
 ---
 
-# 🚀 使用方式
+## 🚀 使用方式
 
 UTE 使用命令列介面管理訓練流程。
 
-基本訓練
+一般 LoRA 訓練
+
+一般 LoRA 是預設訓練模式。
 
 python train.py \
   --model /path/to/model \
   --data-dir /path/to/dataset \
   --output-dir ./output
 
-參數說明：
+也可以明確指定：
+
+python train.py \
+  --model /path/to/model \
+  --data-dir /path/to/dataset \
+  --output-dir ./output \
+  --quantization none
+
+QLoRA 4-bit 訓練
+
+透過 4-bit 量化載入 Base Model，搭配 LoRA 進行訓練。
+
+python train.py \
+  --model /path/to/model \
+  --data-dir /path/to/dataset \
+  --output-dir ./output \
+  --quantization 4bit
+
+QLoRA 自訂量化設定
+
+python train.py \
+  --model /path/to/model \
+  --data-dir /path/to/dataset \
+  --output-dir ./output \
+  --quantization 4bit \
+  --quant-type nf4 \
+  --double-quant \
+  --compute-dtype auto
+
+量化設定參數
+
+參數| 說明
+"--quantization"| 量化模式："none" 或 "4bit"
+"--quant-type"| 4-bit 量化類型："nf4" 或 "fp4"
+"--double-quant"| 啟用 Double Quantization
+"--no-double-quant"| 停用 Double Quantization
+"--compute-dtype"| 計算精度："auto"、"bf16" 或 "fp16"
+
+Compute Dtype 說明
+
+- "auto"：由引擎根據目前 CUDA GPU 的能力選擇適合的計算精度。
+- "bf16"：使用 BF16 計算精度，需要硬體支援。
+- "fp16"：使用 FP16 計算精度。
+
+基本參數說明
 
 參數| 說明
 "--model"| 模型本機路徑或支援的 Hugging Face Model ID
@@ -312,7 +441,9 @@ UTE 也提供訓練設定參數：
 
 python train.py --help
 
-# 🔎 驗證與測試模式
+---
+
+## 🔎 驗證與測試模式
 
 UTE 提供多種訓練前與訓練整合測試功能：
 
@@ -320,6 +451,35 @@ UTE 提供多種訓練前與訓練整合測試功能：
 - Preflight：執行訓練前檢查。
 - Smoke Test：測試基本 Forward / Backward 與 Optimizer 流程。
 - Trainer Integration Test：測試 TRL Trainer 整合。
+
+Validate Only
+
+python train.py \
+  --model /path/to/model \
+  --data-dir /path/to/dataset \
+  --output-dir ./output \
+  --validate-only
+
+Preflight
+
+python train.py \
+  --model /path/to/model \
+  --output-dir ./output \
+  --preflight
+
+Smoke Test
+
+python train.py \
+  --model /path/to/model \
+  --output-dir ./output \
+  --smoke-test
+
+Trainer Integration Test
+
+python train.py \
+  --model /path/to/model \
+  --output-dir ./output \
+  --trainer-integration-test
 
 各測試功能與報告輸出參數可透過：
 
@@ -329,7 +489,7 @@ python train.py --help
 
 ---
 
-# 📊 訓練資料與 Loss 設定
+## 📊 訓練資料與 Loss 設定
 
 UTE 目前採用整段訓練序列參與 Loss 計算的設定。
 
@@ -344,7 +504,7 @@ completion_only_loss = False
 
 ---
 
-# 🖥️ 執行環境與硬體
+## 🖥️ 執行環境與硬體
 
 UTE 的設計目標是避免將訓練流程綁定在單一硬體環境。
 
@@ -361,7 +521,32 @@ UTE 的設計目標是避免將訓練流程綁定在單一硬體環境。
 
 但這些環境並不代表目前都已完成獨立測試。
 
-# 📱 手機與 ARM 環境
+QLoRA 4-bit 硬體需求
+
+目前 UTE 的 QLoRA 4-bit 實作要求：
+
+- 受支援的 NVIDIA CUDA GPU
+- 可正常使用的 PyTorch CUDA 環境
+- bitsandbytes
+- Accelerate
+- 單一 CUDA GPU
+
+QLoRA 透過 4-bit 量化降低 Base Model 的記憶體需求，但不代表不需要 GPU 記憶體。
+
+實際資源需求仍取決於：
+
+- Base Model 大小與架構
+- Sequence Length
+- Batch Size
+- Gradient Accumulation
+- LoRA Configuration
+- Compute Dtype
+- GPU 記憶體容量
+- 其他訓練設定
+
+目前的 QLoRA 實作並不代表所有 CUDA GPU、模型架構與套件版本組合都已通過實測。
+
+## 📱 手機與 ARM 環境
 
 UTE 的核心程式使用 Python，不以 x86_64 作為程式本身的必要條件。
 
@@ -369,14 +554,21 @@ UTE 的核心程式使用 Python，不以 x86_64 作為程式本身的必要條�
 
 然而，手機上的 PyTorch、Transformers、PEFT、TRL 相依套件安裝、模型記憶體需求及硬體加速後端，都需要另外驗證。
 
-# ⚠️ 硬體資源提醒
+一般 LoRA 與 QLoRA 的硬體要求不同。
+
+目前 QLoRA 4-bit 實作要求受支援的 CUDA GPU，因此不能直接假設一般 ARM CPU 或手機 GPU 可以使用這項功能。
+
+## ⚠️ 硬體資源提醒
 
 LoRA 可以降低需要訓練的參數量，但基礎模型仍然需要載入記憶體。
+
+QLoRA 透過量化降低 Base Model 的記憶體需求，但仍需要額外空間存放訓練所需的參數、梯度、Optimizer 狀態與其他運算資料。
 
 實際需求取決於：
 
 - Base Model 大小
 - Model Precision
+- Quantization Configuration
 - Sequence Length
 - Batch Size
 - Gradient Accumulation
@@ -388,7 +580,7 @@ LoRA 可以降低需要訓練的參數量，但基礎模型仍然需要載入記
 
 ---
 
-# 🧪 開發與測試狀態
+## 🧪 開發與測試狀態
 
 目前 UTE 已建立以下測試模組：
 
@@ -399,6 +591,8 @@ Preflight Engine| 訓練前檢查
 Smoke Test| Forward / Backward / Optimizer 測試
 Trainer Integration Test| TRL Trainer 整合測試
 Adapter Output Verifier| Adapter 輸出與重新載入驗證
+Quantization Engine| 量化設定與環境檢查
+Shared Model Loader| 共用模型載入流程
 
 已完成的開發測試
 
@@ -411,20 +605,41 @@ Adapter Output Verifier| Adapter 輸出與重新載入驗證
 - Trainer Integration Test
 - Adapter Verifier 語法與匯入檢查
 - CLI 啟動檢查
+- Python Compileall 檢查
+- QLoRA CLI 參數檢查
+- QLoRA CPU 環境拒絕測試
+- 一般 LoRA 回歸測試
 
-目前已驗證的 Smoke Test 包含：
+目前已驗證的一般 LoRA Smoke Test 包含：
 
 - Tokenization
 - LoRA Injection
 - Forward Pass
 - Backward Pass
+- Gradient 檢查
 - Optimizer Step
+
+一般 LoRA Trainer Integration Test 也已完成：
+
+- Dataset 建立
+- SFTTrainer 初始化
+- Training Step
+- Adapter 儲存
+- Adapter 重新載入
+
+QLoRA 測試限制
+
+目前已完成 QLoRA 4-bit 的程式整合、CLI 驗證與 CPU 環境拒絕測試。
+
+由於目前開發環境沒有 CUDA GPU，尚未完成實際 4-bit 模型載入與 CUDA 訓練的端到端測試。
+
+因此，目前不能宣稱所有 CUDA GPU、模型架構及 bitsandbytes 版本組合均已通過驗證。
 
 注意： 測試模組存在，不代表所有模型、作業系統、硬體後端與依賴版本組合都已通過測試。正式訓練輸出的 Adapter 仍應透過 Adapter Verifier 實際驗證。
 
 ---
 
-# 🔄 設計原則
+## 🔄 設計原則
 
 UTE 遵循以下設計原則：
 
@@ -438,7 +653,7 @@ UTE 是獨立的訓練工具，不屬於任何特定 AI 模型專案。
 
 3. 模組化
 
-硬體偵測、相容性檢查、LoRA 分析、訓練測試及輸出驗證各自獨立。
+硬體偵測、相容性檢查、量化設定、模型載入、LoRA 分析、訓練測試及輸出驗證各自獨立。
 
 4. 可重用性
 
@@ -452,15 +667,21 @@ UTE 是獨立的訓練工具，不屬於任何特定 AI 模型專案。
 
 盡可能將訓練流程與實際硬體環境分離，讓不同環境可以依照相依套件與後端能力使用 UTE。
 
+7. 向後相容性
+
+一般 LoRA 維持預設訓練模式。新增 QLoRA 功能不應強制一般 LoRA 使用者安裝額外的量化依賴。
+
 ---
 
-# 🗺️ 開發方向
+## 🗺️ 開發方向
 
 未來可以持續改善的方向包括：
 
 - [ ] 更完整的跨平台相容性驗證
 - [ ] 更多模型架構相容性測試
 - [ ] 更多 PyTorch 硬體後端測試
+- [ ] QLoRA CUDA 端到端測試
+- [ ] 更多 GPU 與 bitsandbytes 版本相容性測試
 - [ ] 更完整的資料集格式與驗證流程
 - [ ] 更完善的訓練中斷與恢復測試
 - [ ] 更完整的 Adapter 輸出驗證
@@ -471,7 +692,7 @@ UTE 是獨立的訓練工具，不屬於任何特定 AI 模型專案。
 
 ---
 
-# 🤝 參與專案
+## 🤝 參與專案
 
 歡迎對 Python、PyTorch、Transformers、PEFT、TRL 與模型訓練工具有興趣的開發者參與。
 
@@ -488,13 +709,13 @@ UTE 是獨立的訓練工具，不屬於任何特定 AI 模型專案。
 
 ---
 
-# 📜 License
+## 📜 License
 
 UTE 採用 Apache License 2.0 開源授權。
 
 詳細授權內容請參閱：
 
-"LICENSE" (LICENSE)
+"LICENSE"
 
 ---
 
@@ -507,17 +728,17 @@ One Engine. Reusable Training Workflows.
 ## 📬 聯繫創作者
 
 - Gmail: b0953166696@gmail.com
-- 本人17歲🤔 做的不好請見諒
-- 獨立開發 ＆ AI協作
+- 本人17歲 🤔 做的不好請見諒
+- 獨立開發 ＆ AI 協作
 - 緩慢更新 ＆ 除錯
-- 純手機Termux 開發👀
+- 純手機 Termux 開發 👀
 - 持續開發中…
 
 ---
 
-## 👀作品 & 產品 集
+## 👀 作品 & 產品集
 
-- [UTE-UNIVERSAL-TRAINING-ENGINE](https://github.com/a370373/UTE-Universal-Training-Engine)
+- [UTE - Universal Training Engine](https://github.com/a370373/UTE-Universal-Training-Engine)
 - [0-or-1](https://github.com/a370373/0-or-1)
 - [MyDNS](https://github.com/a370373/MyDNS/tree/main)
 - [Cyber-Fly-Android-Bridge](https://github.com/a370373/Cyber-Fly-Android-Bridge)
@@ -525,18 +746,16 @@ One Engine. Reusable Training Workflows.
 - [Cyber-Fly](https://github.com/a370373/Cyber-Fly)
 - [MyOS](https://github.com/a370373/MyOS)
 - [RWM-1:1 Real World Minecraft](https://github.com/a370373/RWM-Real-World-Minecraft)
-- [MyAI-Offline Personal AI Agent System](https://github.com/a370373/MyAI-Offline-Personal-AI-Agent-System-/tree/main)
+- [MyAI - Offline Personal AI Agent System](https://github.com/a370373/MyAI-Offline-Personal-AI-Agent-System-/tree/main)
 - [WCL - Web Clone Lab](https://github.com/a370373/web-clone-lab/)
-- 持續增加中…👀
+- 持續增加中… 👀
 
 ---
 
-## 🤖 AI 協作
+🤖 AI 協作
 
 UTE 由 a370373/XRH 發起、設計與開發。
 
-開發過程中使用 OpenAI ChatGPT 作為 AI 協作夥伴，協助進行 技術分析、程式碼檢查、除錯 & 文件整理。
+開發過程中使用 OpenAI ChatGPT 作為 AI 協作夥伴，協助進行技術分析、程式碼檢查、除錯與文件整理。
 
-產品方向、設計理念 & 最終決策由專案創作者負責。
-
-
+產品方向、設計理念與最終決策由專案創作者負責。
