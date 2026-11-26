@@ -967,6 +967,7 @@ One Engine. Reusable Training Workflows.
 
 ## 👀 作品 & 產品集
 
+- [MySSH](https://github.com/a370373/MySSH-Server)
 - [UTE - Universal Training Engine](https://github.com/a370373/UTE-Universal-Training-Engine)
 - [0-or-1](https://github.com/a370373/0-or-1)
 - [MyDNS](https://github.com/a370373/MyDNS/tree/main)
