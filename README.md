@@ -631,6 +631,142 @@ completion_only_loss = False
 
 ---
 
+# 📦 模型匯出與 GGUF 轉換（Model Export & GGUF Conversion）
+
+UTE 提供選用工具，讓使用者能將訓練完成的 PEFT Adapter 合併回基礎模型，並轉換成 GGUF 格式，以便搭配 llama.cpp 等相容的推論引擎使用。
+
+完整匯出流程：
+
+1. 🔗 將 LoRA 或 QLoRA Adapter 合併至對應的基礎模型。
+2. 📁 匯出獨立的 Hugging Face Transformers 模型。
+3. 🔄 將合併後的模型轉換為 GGUF 格式。
+4. ⚡ 可選擇進行量化，以降低模型檔案大小與推論所需的記憶體。
+
+1. 🔗 合併 Adapter（Merge Adapter）
+
+使用 "tools/merge_adapter.py"，將訓練完成的 PEFT Adapter 合併至對應的基礎模型。
+
+python3 tools/merge_adapter.py \
+  --base-model /path/to/base-model \
+  --adapter /path/to/adapter \
+  --output /path/to/merged-model \
+  --dtype bfloat16
+
+參數說明：
+
+參數| 說明
+"--base-model"| 原始 Hugging Face 基礎模型路徑
+"--adapter"| 已訓練完成的 PEFT Adapter 目錄
+"--output"| 合併後模型的輸出目錄
+"--dtype"| 模型載入精度："auto"、"float16"、"bfloat16" 或 "float32"
+"--trust-remote-code"| 必要時允許載入模型提供的自訂程式碼
+
+此工具使用 PEFT 提供的模型合併功能，將 Adapter 合併至基礎模型，產生獨立的 Hugging Face 模型。
+
+支援標準 LoRA Adapter，以及使用 PEFT "modules_to_save" 的 Adapter，例如包含可訓練 Input Embeddings 或 Output LM Head 的配置；實際支援情況取決於模型架構與相依套件的相容性。
+
+# ⚠️ QLoRA 注意事項：
+
+合併 QLoRA Adapter 時，工具會重新載入對應的原始、非量化 Hugging Face 基礎模型，再套用 Adapter 並進行合併。
+
+不支援直接將 Adapter 合併至任意 4-bit 或 GGUF 模型。
+
+2. 🔄 轉換為 GGUF（Convert to GGUF）
+
+使用 "tools/convert_gguf.py"，將合併完成的 Hugging Face 模型轉換為 GGUF 格式。
+
+此功能需要相容版本的 llama.cpp。
+
+python3 tools/convert_gguf.py \
+  --model /path/to/merged-model \
+  --output /path/to/output/model-f16.gguf \
+  --llama-cpp /path/to/llama.cpp \
+  --outtype f16
+
+參數說明：
+
+參數| 說明
+"--model"| Hugging Face 模型目錄
+"--output"| GGUF 輸出檔案路徑
+"--llama-cpp"| llama.cpp 專案目錄
+"--outtype"| GGUF 輸出精度："f32"、"f16" 或 "bf16"
+"--quantization"| 選用的 GGUF 量化格式
+"--quantize-bin"| 可選擇指定 "llama-quantize" 執行檔路徑
+"--keep-f16"| 量化完成後保留中間產生的 GGUF 檔案
+"--python"| 執行 llama.cpp 轉換工具時使用的 Python 執行檔
+
+轉換過程會使用 llama.cpp 提供的 "convert_hf_to_gguf.py"。
+
+# ⚠️ 模型架構支援情況取決於所使用的 llama.cpp 版本。
+
+3. ⚡ GGUF 量化（GGUF Quantization）
+
+量化是選用功能，可以依照使用需求降低模型檔案大小與推論記憶體需求。
+
+例如，將模型轉換並量化為 "Q4_K_M"：
+
+python3 tools/convert_gguf.py \
+  --model /path/to/merged-model \
+  --output /path/to/output/model-Q4_K_M.gguf \
+  --llama-cpp /path/to/llama.cpp \
+  --outtype f16 \
+  --quantization Q4_K_M
+
+常見量化格式：
+
+- "Q4_K_M"
+- "Q5_K_M"
+- "Q8_0"
+
+實際可使用的量化格式取決於目前安裝的 llama.cpp 版本。
+
+若希望保留量化前的 F16 GGUF 檔案，可以額外加入：
+
+--keep-f16
+
+4. 🏗️ 完整模型匯出流程（Complete Export Workflow）
+
+從 UTE 訓練到 GGUF 模型匯出的完整流程：
+```
+Base Model（基礎模型）
+          |
+          v
+UTE Training（模型訓練）
+          |
+          v
+LoRA / QLoRA Adapter
+          |
+          v
+merge_adapter.py
+          |
+          v
+Merged Hugging Face Model
+（合併後的 Hugging Face 模型）
+          |
+          v
+convert_gguf.py
+          |
+          v
+GGUF Model
+          |
+          v
+Optional Quantization（選用量化）
+          |
+          v
+Quantized GGUF Model
+（量化後的 GGUF 模型）
+```
+5. 📝 注意事項（Notes）
+
+- 📂 所有模型路徑、Adapter 路徑、輸出路徑與 llama.cpp 目錄，皆由使用者透過命令列參數自行指定。
+- 🔧 工具不依賴固定的模型目錄，也不限定特定模型名稱。
+- 🧩 實際轉換結果取決於模型架構、Transformers、PEFT 與 llama.cpp 之間的相容性。
+- ⚠️ 工具具備基本輸入與輸出檢查，但通過檢查不代表所有模型架構或 Adapter 配置都能成功轉換。
+- 🧪 在正式使用特定模型配置前，建議實際執行完整合併、轉換與推論測試。
+
+# UTE 的目標是提供從模型訓練、Adapter 合併到 GGUF 匯出的整合工作流程。
+
+---
 # 🧪 開發與測試狀態
 
 目前 UTE 已建立以下測試模組：
